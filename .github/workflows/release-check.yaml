@@ -76,6 +76,17 @@ jobs:
       contents: write
       pull-requests: write
     steps:
+      # A GitHub App token (not GITHUB_TOKEN) is required so that:
+      #  1. the PR it opens triggers the container-test workflow
+      #     (GITHUB_TOKEN-created PRs do not cascade pull_request events), and
+      #  2. auto-merge can be enabled (GITHUB_TOKEN cannot enable it).
+      - name: Mint release-bot token
+        id: app-token
+        uses: actions/create-github-app-token@67018539274d69449ef7c02e8e71183d1719ab42 # v2.1.4
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -94,9 +105,10 @@ jobs:
           } > .release-meta
 
       - name: Create pull request
+        id: cpr
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
           commit-message: "Update UniFi OS Server to ${{ needs.release-check.outputs.UOS_VERSION }}"
           committer: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
           author: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
@@ -111,3 +123,14 @@ jobs:
 
             Merging this PR triggers the **Publish image** workflow, which builds
             and pushes the multiarch image for this version.
+
+      - name: Enable auto-merge
+        # Uses the App token: GITHUB_TOKEN cannot enable auto-merge. Rebase
+        # keeps main linear with the single version-bump commit. Merges once
+        # the required container boot-test checks pass (enforced by the
+        # protect-main ruleset); no approval is required.
+        if: steps.cpr.outputs.pull-request-number
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR: ${{ steps.cpr.outputs.pull-request-number }}
+        run: gh pr merge "$PR" --auto --rebase --repo "$GITHUB_REPOSITORY"
