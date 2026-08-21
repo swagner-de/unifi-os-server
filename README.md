@@ -17,29 +17,17 @@ See [docker-compose.yaml](https://github.com/swagner-de/unifi-os-server/blob/mai
 
 ## Kubernetes
 
-See [kubernetes](https://github.com/swagner-de/unifi-os-server/tree/main/kubernetes)
+Install the Helm chart (published as an OCI artifact):
 
-Deployment example uses [ingress-nginx](https://github.com/kubernetes/ingress-nginx) for the ingress and [longhorn](https://github.com/longhorn/longhorn) for storage.
-
-Your ingress controller must be modified to accept extra ports. For example, `ingress-nginx` Helm values:
-
-```yaml
-tcp:
-  5005: "unifi/unifi-os-server-rtp-svc:5005" # Optional
-  9543: "unifi/unifi-os-server-id-hub-svc:9543" # Optional
-  6789: "unifi/unifi-os-server-mobile-speedtest-svc:6789" # Optional
-  8080: "unifi/unifi-os-server-communication-svc:8080"
-  8444: "unifi/unifi-os-server-hotspot-secured-svc:8444" # Optional
-  28082: "unifi/unifi-os-server-support-files:28082" # Optional
-  5671: "unifi/unifi-os-server-aqmps-svc:5671" # Optional
-  8880: "unifi/unifi-os-server-hotspot-redirect-0-svc:8880" # Optional
-  8881: "unifi/unifi-os-server-hotspot-redirect-1-svc:8881" # Optional
-  8882: "unifi/unifi-os-server-hotspot-redirect-2-svc:8882" # Optional
-udp:
-  3478: "unifi/unifi-os-server-stun-svc:3478"
-  5514: "unifi/unifi-os-server-syslog-svc:5514" # Optional
-  10003: "unifi/unifi-os-server-discovery-svc:10003"
+```bash
+helm install unifi-os-server oci://ghcr.io/swagner-de/unifi-os-server \
+  --namespace unifi --create-namespace
 ```
+
+The chart runs in **privileged mode** (required by UniFi OS Server's internal
+systemd). See the [chart README](https://github.com/swagner-de/unifi-os-server/blob/main/charts/unifi-os-server/README.md)
+for security considerations, device adoption, ports, and how to supply
+NetworkPolicies or extra volumes.
 
 # Parameters
 
@@ -102,6 +90,11 @@ with an automated, tested release pipeline:
   separate per-arch tags.
 - **Merge-gated publishing.** The image is built and pushed **only after** the
   release PR merges to `main`, never speculatively on every scheduled run.
+- **A Helm chart ships alongside the image.** The
+  [`charts/unifi-os-server`](https://github.com/swagner-de/unifi-os-server/tree/main/charts/unifi-os-server)
+  chart is published as an OCI artifact to the same GHCR path and is
+  version-bumped automatically by the release workflow (its `appVersion`
+  tracks the UniFi OS Server version).
 
 Images are published to
 [`ghcr.io/swagner-de/unifi-os-server`](https://github.com/swagner-de/unifi-os-server/pkgs/container/unifi-os-server).
