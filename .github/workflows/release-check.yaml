@@ -47,36 +47,23 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - name: Check if this version is already released or in progress
+      - name: Check if this version is already released
         id: release
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           UOS_VERSION: ${{ steps.version.outputs.UOS_VERSION }}
         run: |
           set -euo pipefail
 
-          # Already published to main?
+          # Only skip if this version already landed on main. An open PR is
+          # NOT a skip condition: re-running create-pr lets
+          # create-pull-request reconcile (rebase) the existing branch onto
+          # the latest main, so a stale PR gets refreshed instead of stuck.
           current=$(grep -oP 'APP_VERSION="\K[^"]+' Dockerfile)
           if [ "${current}" = "${UOS_VERSION}" ]; then
             echo "APP_VERSION ${UOS_VERSION} already on main!"
             echo "released=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          # Open PR for this version already in review? (A closed/unmerged PR
-          # must not block re-proposing; the Dockerfile check above already
-          # covers versions that made it to main.)
-          pr_count=$(gh pr list \
-            --repo "${GITHUB_REPOSITORY}" \
-            --head "updates-unifi-core-${UOS_VERSION}" \
-            --state open \
-            --json number \
-            --jq 'length')
-          if [ "${pr_count}" -gt 0 ]; then
-            echo "Open PR for ${UOS_VERSION} already exists!"
-            echo "released=true" >> "$GITHUB_OUTPUT"
           else
-            echo "Version ${UOS_VERSION} is new."
+            echo "Version ${UOS_VERSION} needs a PR (new, or existing PR to rebase)."
             echo "released=false" >> "$GITHUB_OUTPUT"
           fi
 
