@@ -5,10 +5,6 @@ on:
   schedule:
     - cron: "27 * * * *"
 
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
-
 jobs:
   release-check:
     runs-on: ubuntu-24.04
@@ -51,131 +47,41 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - name: Check if pull request already exists
+      - name: Check if this version is already released or in progress
         id: release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UOS_VERSION: ${{ steps.version.outputs.UOS_VERSION }}
         run: |
           set -euo pipefail
+
+          # Already published to main?
+          current=$(grep -oP 'APP_VERSION="\K[^"]+' Dockerfile)
+          if [ "${current}" = "${UOS_VERSION}" ]; then
+            echo "APP_VERSION ${UOS_VERSION} already on main!"
+            echo "released=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # PR (open or already merged/closed) for this version?
           pr_count=$(gh pr list \
             --repo "${GITHUB_REPOSITORY}" \
-            --head "updates-unifi-core-${{ steps.version.outputs.UOS_VERSION }}" \
+            --head "updates-unifi-core-${UOS_VERSION}" \
             --state all \
             --json number \
             --jq 'length')
           if [ "${pr_count}" -gt 0 ]; then
-            echo "APP_VERSION ${{ steps.version.outputs.UOS_VERSION }} already exists!"
+            echo "PR for ${UOS_VERSION} already exists!"
             echo "released=true" >> "$GITHUB_OUTPUT"
           else
-            echo "APP_VERSION ${{ steps.version.outputs.UOS_VERSION }} does not exist!"
+            echo "Version ${UOS_VERSION} is new."
             echo "released=false" >> "$GITHUB_OUTPUT"
           fi
 
-  build:
-    needs: release-check
-    if: needs.release-check.outputs.RELEASED == 'false'
-    permissions:
-      contents: read
-      packages: write
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - platform: linux/amd64
-            runner: ubuntu-24.04
-            suffix: linux-amd64
-          - platform: linux/arm64
-            runner: ubuntu-24.04-arm
-            suffix: linux-arm64
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 15
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-
-      - name: Download installer
-        run: |
-          if [ "${{ matrix.suffix }}" = "linux-amd64" ]; then
-            URL="${{ needs.release-check.outputs.UOS_DOWNLOAD_AMD64 }}"
-          else
-            URL="${{ needs.release-check.outputs.UOS_DOWNLOAD_ARM64 }}"
-          fi
-          curl -fSL -o unifi-os-server "$URL"
-
-      - name: Extract OCI image from installer
-        run: |
-          # The installer is an ELF+ZIP polyglot — the OCI image is in the
-          # appended ZIP archive. No need to execute the installer.
-          # unzip returns exit code 1 for the "extra bytes" warning but
-          # extracts successfully, so we allow exit 1.
-          unzip -o unifi-os-server image.tar || [ $? -le 1 ]
-          rm unifi-os-server
-          test -f image.tar
-
-      - name: Load base image
-        id: base
-        run: |
-          IMAGE_REF=$(podman load -i image.tar | grep -oP '(?:Loaded image\(s\): |Loaded image: )\K\S+')
-          echo "image_ref=$IMAGE_REF" >> "$GITHUB_OUTPUT"
-          echo "Loaded: $IMAGE_REF"
-          rm image.tar
-
-      - name: Build final image
-        env:
-          APP_VERSION: ${{ needs.release-check.outputs.UOS_VERSION }}
-        run: |
-          sed -i "s/APP_VERSION=.*/APP_VERSION=\"$APP_VERSION\"/" Dockerfile
-          podman build \
-            --build-arg BASE_IMAGE=${{ steps.base.outputs.image_ref }} \
-            -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.release-check.outputs.UOS_VERSION }}-${{ matrix.suffix }} \
-            .
-
-      - name: Login to GHCR
-        uses: redhat-actions/podman-login@4c93cb1ea36b10156ea541570dc69bc04dffe10e # v1.1.2
-        with:
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
-          registry: ${{ env.REGISTRY }}
-
-      - name: Push image
-        run: |
-          podman push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.release-check.outputs.UOS_VERSION }}-${{ matrix.suffix }}
-
-  merge:
-    needs: [release-check, build]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      packages: write
-    steps:
-      - name: Log in to the Container registry
-        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Create and push multiarch manifest
-        env:
-          VERSION: ${{ needs.release-check.outputs.UOS_VERSION }}
-        run: |
-          docker manifest create \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${VERSION} \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${VERSION}-linux-amd64 \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${VERSION}-linux-arm64
-
-          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${VERSION}
-
-          docker manifest create \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${VERSION}-linux-amd64 \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${VERSION}-linux-arm64
-
-          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-
   create-pr:
     runs-on: ubuntu-24.04
-    needs: [release-check, merge]
+    needs: release-check
+    if: needs.release-check.outputs.RELEASED == 'false'
     timeout-minutes: 10
     permissions:
       contents: write
@@ -184,11 +90,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - name: Update version in Dockerfile
+      - name: Update Dockerfile and release metadata
         env:
           UOS_VERSION: ${{ needs.release-check.outputs.UOS_VERSION }}
+          UOS_DOWNLOAD_AMD64: ${{ needs.release-check.outputs.UOS_DOWNLOAD_AMD64 }}
+          UOS_DOWNLOAD_ARM64: ${{ needs.release-check.outputs.UOS_DOWNLOAD_ARM64 }}
         run: |
+          set -euo pipefail
           sed -i "s/APP_VERSION=.*/APP_VERSION=\"$UOS_VERSION\"/" Dockerfile
+          {
+            echo "UOS_VERSION=$UOS_VERSION"
+            echo "UOS_DOWNLOAD_AMD64=$UOS_DOWNLOAD_AMD64"
+            echo "UOS_DOWNLOAD_ARM64=$UOS_DOWNLOAD_ARM64"
+          } > .release-meta
 
       - name: Create pull request
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
@@ -199,6 +113,12 @@ jobs:
           author: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
           branch: updates-unifi-core-${{ needs.release-check.outputs.UOS_VERSION }}
           base: main
+          add-paths: |
+            Dockerfile
+            .release-meta
           title: "Update UniFi OS Server to ${{ needs.release-check.outputs.UOS_VERSION }}"
           body: |
-            Bump UniFi OS Server to `${{ needs.release-check.outputs.UOS_VERSION }}`
+            Bump UniFi OS Server to `${{ needs.release-check.outputs.UOS_VERSION }}`.
+
+            Merging this PR triggers the **Publish image** workflow, which builds
+            and pushes the multiarch image for this version.
