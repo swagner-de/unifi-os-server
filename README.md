@@ -1,7 +1,7 @@
 # UniFi OS Server
 
-<a href="https://github.com/lemker/unifi-os-server/pkgs/container/unifi-os-server"><img src="https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fgithub.com%2Flemker%2Funifi-os-server%2Fpkgs%2Fcontainer%2Funifi-os-server&search=(%3Fs)%3Cspan%5B%5E%3E%5D*%3E%5Cs*Total%5Cs%2Bdownloads%5Cs*%3C%2Fspan%3E.*%3F%3Ch3%5B%5E%3E%5D*%3E%5Cs*(%5B0-9%5D%5B0-9.%2C%5D*%5Cs*%5BKM%5D%3F)%5Cs*%3C%2Fh3%3E&replace=%241&logo=github&label=Downloads&cacheSeconds=3600"></a>
-<a href="https://github.com/lemker/unifi-os-server/actions/workflows/build-image.yaml"><img src="https://img.shields.io/github/actions/workflow/status/lemker/unifi-os-server/build-image.yaml?logo=githubactions&logoColor=white&label=Actions"></a>
+<a href="https://github.com/swagner-de/unifi-os-server/pkgs/container/unifi-os-server"><img src="https://img.shields.io/badge/ghcr.io-unifi--os--server-blue?logo=github&label=Container"></a>
+<a href="https://github.com/swagner-de/unifi-os-server/actions/workflows/publish.yaml"><img src="https://img.shields.io/github/actions/workflow/status/swagner-de/unifi-os-server/publish.yaml?logo=githubactions&logoColor=white&label=Publish"></a>
 
 Run [UniFi OS Server](https://blog.ui.com/article/introducing-unifi-os-server) directly in Docker or Kubernetes.
 
@@ -13,11 +13,11 @@ Run [UniFi OS Server](https://blog.ui.com/article/introducing-unifi-os-server) d
 
 ## Docker Compose
 
-See [docker-compose.yaml](https://github.com/lemker/unifi-os-server/blob/main/docker-compose.yaml)
+See [docker-compose.yaml](https://github.com/swagner-de/unifi-os-server/blob/main/docker-compose.yaml)
 
 ## Kubernetes
 
-See [kubernetes](https://github.com/lemker/unifi-os-server/tree/main/kubernetes)
+See [kubernetes](https://github.com/swagner-de/unifi-os-server/tree/main/kubernetes)
 
 Deployment example uses [ingress-nginx](https://github.com/kubernetes/ingress-nginx) for the ingress and [longhorn](https://github.com/longhorn/longhorn) for storage.
 
@@ -84,11 +84,40 @@ Overrides your detected hardware platform. Accepted values are: `synology`.
 | TCP | 8881 | Ingress | Hotspot portal redirection (HTTP) |
 | TCP | 8882 | Ingress | Hotspot portal redirection (HTTP) |
 
+# How this image is built
+
+This is a fork of [`lemker/unifi-os-server`](https://github.com/lemker/unifi-os-server)
+with an automated, tested release pipeline:
+
+- **Automated release tracking.** A scheduled workflow polls Ubiquiti's
+  firmware API for new UniFi OS Server releases and opens a pull request that
+  bumps the version. No manual version bumps.
+- **Every release is boot-tested before publish.** When the release PR opens,
+  a workflow builds the image for **both `linux/amd64` and `linux/arm64`**,
+  boots it under systemd, waits for the system to reach a running state, and
+  verifies the UniFi UI actually responds on port 443. The PR can only merge
+  once these checks pass, so a broken build never reaches the registry.
+- **One multiarch tag per version.** Publishing produces a single
+  `:<version>` manifest (plus `:latest`) covering amd64 and arm64 — not
+  separate per-arch tags.
+- **Merge-gated publishing.** The image is built and pushed **only after** the
+  release PR merges to `main`, never speculatively on every scheduled run.
+
+Images are published to
+[`ghcr.io/swagner-de/unifi-os-server`](https://github.com/swagner-de/unifi-os-server/pkgs/container/unifi-os-server).
+
 # Frequently Asked Questions
 
-## What is the difference between images?
+## How is the image assembled?
 
-The `uosserver` image is provided by UniFi, extracted from the installation binary. The `unifi-os-server` image provides better compatibility for Docker and Kubernetes with directory fixes and configuration through environment variables.
+The base image is Ubiquiti's official UniFi OS Server, extracted directly from
+the installer download (an ELF+ZIP polyglot that embeds an OCI image). On top
+of that base, this repo layers [`uos-entrypoint.sh`](https://github.com/swagner-de/unifi-os-server/blob/main/uos-entrypoint.sh)
+(originally from [lemker](https://github.com/lemker/unifi-os-server)),
+which handles Docker/Kubernetes compatibility: persisting `UOS_UUID`, creating
+the required `/usr/lib` metadata files, initializing log/data directories,
+applying Synology overrides, and setting the system IP — all configurable via
+environment variables. No Ubiquiti binaries are modified.
 
 ## Why does the container need specific settings for cgroup and tmpfs?
 
