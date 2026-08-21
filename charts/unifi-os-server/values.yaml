@@ -1,0 +1,62 @@
+image:
+  repository: ghcr.io/swagner-de/unifi-os-server
+  tag: ""
+
+uosSystemIP: ""
+
+podAnnotations: {}
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+
+persistence:
+  data:
+    enabled: true
+    size: 20Gi
+    accessMode: ReadWriteOnce
+    storageClass: ""
+  extraVolumes: []
+
+service:
+  main:
+    type: ClusterIP
+    annotations: {}
+    # Optional feature ports, exposed by default. Remove any you don't use.
+    extraPorts:
+      rtp:
+        port: 5005
+        protocol: TCP
+      id-hub:
+        port: 9543
+        protocol: TCP
+      mobile-speedtest:
+        port: 6789
+        protocol: TCP
+      hotspot-secured:
+        port: 8444
+        protocol: TCP
+      support-files:
+        port: 28082
+        protocol: TCP
+      aqmps:
+        port: 5671
+        protocol: TCP
+      hotspot-redirect-0:
+        port: 8880
+        protocol: TCP
+      hotspot-redirect-1:
+        port: 8881
+        protocol: TCP
+      hotspot-redirect-2:
+        port: 8882
+        protocol: TCP
+      syslog:
+        port: 5514
+        protocol: UDP
+  stun:
+    type: LoadBalancer
+    annotations: {}
+
+extraManifests: []

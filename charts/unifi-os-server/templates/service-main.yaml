@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "uos.fullname" . }}
+  labels:
+    {{- include "uos.labels" . | nindent 4 }}
+  {{- with .Values.service.main.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.main.type }}
+  selector:
+    {{- include "uos.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: https
+      port: 443
+      targetPort: 443
+      protocol: TCP
+    - name: inform
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+    {{- range $name, $p := .Values.service.main.extraPorts }}
+    - name: {{ $name }}
+      port: {{ $p.port }}
+      targetPort: {{ $p.targetPort | default $p.port }}
+      protocol: {{ $p.protocol | default "TCP" }}
+    {{- end }}

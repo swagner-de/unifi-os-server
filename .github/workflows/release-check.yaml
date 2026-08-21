@@ -97,12 +97,46 @@ jobs:
           UOS_DOWNLOAD_ARM64: ${{ needs.release-check.outputs.UOS_DOWNLOAD_ARM64 }}
         run: |
           set -euo pipefail
+          chart=charts/unifi-os-server/Chart.yaml
+
+          # Old UOS version (before bump) drives the chart semver delta.
+          old_uos=$(grep -oP 'APP_VERSION="\K[^"]+' Dockerfile || true)
+          if [ -z "$old_uos" ]; then
+            echo "Could not read current APP_VERSION from Dockerfile" >&2
+            exit 1
+          fi
+
           sed -i "s/APP_VERSION=.*/APP_VERSION=\"$UOS_VERSION\"/" Dockerfile
           {
             echo "UOS_VERSION=$UOS_VERSION"
             echo "UOS_DOWNLOAD_AMD64=$UOS_DOWNLOAD_AMD64"
             echo "UOS_DOWNLOAD_ARM64=$UOS_DOWNLOAD_ARM64"
           } > .release-meta
+
+          # Chart appVersion tracks the UOS firmware version verbatim.
+          sed -i "s/^appVersion:.*/appVersion: \"$UOS_VERSION\"/" "$chart"
+
+          # Chart version mirrors the UOS semver delta: bump the same level
+          # (major/minor/patch) that changed upstream.
+          cur_ver=$(grep -oP '^version:\s*\K\S+' "$chart")
+          IFS=. read -r cmaj cmin cpat <<EOF
+          $cur_ver
+          EOF
+          IFS=. read -r omaj omin _opat <<EOF
+          $old_uos
+          EOF
+          IFS=. read -r nmaj nmin _npat <<EOF
+          $UOS_VERSION
+          EOF
+          if [ "$nmaj" != "$omaj" ]; then
+            new_ver="$((cmaj + 1)).0.0"
+          elif [ "$nmin" != "$omin" ]; then
+            new_ver="${cmaj}.$((cmin + 1)).0"
+          else
+            new_ver="${cmaj}.${cmin}.$((cpat + 1))"
+          fi
+          sed -i "s/^version:.*/version: $new_ver/" "$chart"
+          echo "Chart version $cur_ver -> $new_ver (appVersion $UOS_VERSION)"
 
       - name: Create pull request
         id: cpr
@@ -117,6 +151,7 @@ jobs:
           add-paths: |
             Dockerfile
             .release-meta
+            charts/unifi-os-server/Chart.yaml
           title: "Update UniFi OS Server to ${{ needs.release-check.outputs.UOS_VERSION }}"
           body: |
             Bump UniFi OS Server to `${{ needs.release-check.outputs.UOS_VERSION }}`.
