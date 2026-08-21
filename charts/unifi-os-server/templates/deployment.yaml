@@ -1,0 +1,121 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "uos.fullname" . }}
+  labels:
+    {{- include "uos.labels" . | nindent 4 }}
+spec:
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "uos.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "uos.selectorLabels" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      terminationGracePeriodSeconds: 120
+      containers:
+        - name: main
+          image: {{ include "uos.image" . | quote }}
+          securityContext:
+            privileged: true
+          env:
+            {{- if .Values.uosSystemIP }}
+            - name: UOS_SYSTEM_IP
+              value: {{ .Values.uosSystemIP | quote }}
+            {{- else }}
+            - name: UOS_SYSTEM_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /api/ping
+              port: 80
+            initialDelaySeconds: 60
+            periodSeconds: 60
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /api/ping
+              port: 80
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          startupProbe:
+            httpGet:
+              path: /api/ping
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 30
+          volumeMounts:
+            {{- if .Values.persistence.data.enabled }}
+            - name: data
+              mountPath: /data
+              subPath: data
+            - name: data
+              mountPath: /var/lib/unifi
+              subPath: unifi
+            - name: data
+              mountPath: /var/lib/mongodb
+              subPath: mongodb
+            - name: data
+              mountPath: /var/log
+              subPath: log
+            {{- end }}
+            - name: tmpfs-run
+              mountPath: /run
+            - name: tmpfs-run-lock
+              mountPath: /run/lock
+            - name: cgroup
+              mountPath: /sys/fs/cgroup
+            {{- range .Values.persistence.extraVolumes }}
+            {{- $volName := .name }}
+            {{- range .mounts }}
+            - name: {{ $volName }}
+              mountPath: {{ .path }}
+              {{- if .subPath }}
+              subPath: {{ .subPath }}
+              {{- end }}
+              {{- if .readOnly }}
+              readOnly: {{ .readOnly }}
+              {{- end }}
+            {{- end }}
+            {{- end }}
+      volumes:
+        {{- if .Values.persistence.data.enabled }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "uos.fullname" . }}-data
+        {{- end }}
+        - name: tmpfs-run
+          emptyDir:
+            medium: Memory
+        - name: tmpfs-run-lock
+          emptyDir:
+            medium: Memory
+        - name: cgroup
+          hostPath:
+            path: /sys/fs/cgroup
+        {{- range .Values.persistence.extraVolumes }}
+        - name: {{ .name }}
+          {{- if .secret }}
+          secret:
+            {{- toYaml .secret | nindent 12 }}
+          {{- else if .emptyDir }}
+          emptyDir:
+            {{- toYaml .emptyDir | nindent 12 }}
+          {{- else if .persistentVolumeClaim }}
+          persistentVolumeClaim:
+            {{- toYaml .persistentVolumeClaim | nindent 12 }}
+          {{- end }}
+        {{- end }}
