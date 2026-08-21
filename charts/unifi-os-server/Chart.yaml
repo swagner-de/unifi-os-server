@@ -1,0 +1,12 @@
+apiVersion: v2
+name: unifi-os-server
+description: UniFi OS Server - self-hosted UniFi Network with Organizations, IdP, and Site Magic SD-WAN support
+type: application
+version: 0.1.0
+appVersion: "5.1.37"
+home: https://github.com/swagner-de/unifi-os-server
+sources:
+  - https://github.com/swagner-de/unifi-os-server
+maintainers:
+  - name: swagner-de
+    email: swagner-de@users.noreply.github.com

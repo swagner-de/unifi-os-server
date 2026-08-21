@@ -1,0 +1,31 @@
+image:
+  repository: ghcr.io/swagner-de/unifi-os-server
+  tag: ""
+
+uosSystemIP: ""
+
+podAnnotations: {}
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+
+persistence:
+  data:
+    enabled: true
+    size: 20Gi
+    accessMode: ReadWriteOnce
+    storageClass: ""
+  extraVolumes: []
+
+service:
+  main:
+    type: ClusterIP
+    annotations: {}
+    extraPorts: {}
+  stun:
+    type: LoadBalancer
+    annotations: {}
+
+extraManifests: []
