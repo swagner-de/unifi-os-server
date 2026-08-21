@@ -100,7 +100,11 @@ jobs:
           chart=charts/unifi-os-server/Chart.yaml
 
           # Old UOS version (before bump) drives the chart semver delta.
-          old_uos=$(grep -oP 'APP_VERSION="\K[^"]+' Dockerfile)
+          old_uos=$(grep -oP 'APP_VERSION="\K[^"]+' Dockerfile || true)
+          if [ -z "$old_uos" ]; then
+            echo "Could not read current APP_VERSION from Dockerfile" >&2
+            exit 1
+          fi
 
           sed -i "s/APP_VERSION=.*/APP_VERSION=\"$UOS_VERSION\"/" Dockerfile
           {
