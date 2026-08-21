@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "uos.fullname" . }}-stun
+  labels:
+    {{- include "uos.labels" . | nindent 4 }}
+  {{- with .Values.service.stun.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.stun.type }}
+  selector:
+    {{- include "uos.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: stun
+      port: 3478
+      targetPort: 3478
+      protocol: UDP
+    - name: discovery
+      port: 10003
+      targetPort: 10003
+      protocol: UDP
