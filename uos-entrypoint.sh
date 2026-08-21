@@ -35,6 +35,10 @@ echo "Setting PRODUCT_NAME to $PRODUCT_NAME"
 echo "$APP_MODEL.0000000.$APP_VERSION.0000000.000000.0000" > /usr/lib/version
 echo "$FIRMWARE_PLATFORM" > /usr/lib/platform
 echo "$PRODUCT_NAME" > /usr/lib/product_name
+# ubnt-tools reads the console model from this file (not the env var); without
+# it board.shortname is empty and unifi-core aborts with "Unsupported console
+# model", which crash-loops unifi.service.
+echo "$APP_MODEL" > /usr/lib/app_model
 
 # Create eth0 alias to tap0 (requires NET_ADMIN cap & macvlan kernel module loaded on host) 
 if [ ! -d "/sys/devices/virtual/net/eth0" ] && [ -d "/sys/devices/virtual/net/tap0" ]; then
