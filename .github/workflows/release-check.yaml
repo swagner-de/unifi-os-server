@@ -63,15 +63,17 @@ jobs:
             exit 0
           fi
 
-          # PR (open or already merged/closed) for this version?
+          # Open PR for this version already in review? (A closed/unmerged PR
+          # must not block re-proposing; the Dockerfile check above already
+          # covers versions that made it to main.)
           pr_count=$(gh pr list \
             --repo "${GITHUB_REPOSITORY}" \
             --head "updates-unifi-core-${UOS_VERSION}" \
-            --state all \
+            --state open \
             --json number \
             --jq 'length')
           if [ "${pr_count}" -gt 0 ]; then
-            echo "PR for ${UOS_VERSION} already exists!"
+            echo "Open PR for ${UOS_VERSION} already exists!"
             echo "released=true" >> "$GITHUB_OUTPUT"
           else
             echo "Version ${UOS_VERSION} is new."
