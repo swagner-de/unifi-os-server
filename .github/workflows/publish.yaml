@@ -1,0 +1,170 @@
+name: Publish image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .release-meta
+      - Dockerfile
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  meta:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      UOS_VERSION: ${{ steps.read.outputs.UOS_VERSION }}
+      UOS_DOWNLOAD_AMD64: ${{ steps.read.outputs.UOS_DOWNLOAD_AMD64 }}
+      UOS_DOWNLOAD_ARM64: ${{ steps.read.outputs.UOS_DOWNLOAD_ARM64 }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Read release metadata
+        id: read
+        run: |
+          set -euo pipefail
+          test -f .release-meta
+          # shellcheck disable=SC1091
+          . ./.release-meta
+          if [ -z "${UOS_VERSION:-}" ] || [ -z "${UOS_DOWNLOAD_AMD64:-}" ] || [ -z "${UOS_DOWNLOAD_ARM64:-}" ]; then
+            echo ".release-meta is missing required fields" >&2
+            exit 1
+          fi
+          echo "UOS_VERSION=$UOS_VERSION" >> "$GITHUB_OUTPUT"
+          echo "UOS_DOWNLOAD_AMD64=$UOS_DOWNLOAD_AMD64" >> "$GITHUB_OUTPUT"
+          echo "UOS_DOWNLOAD_ARM64=$UOS_DOWNLOAD_ARM64" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: meta
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+            suffix: linux-amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            suffix: linux-arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Download installer
+        run: |
+          if [ "${{ matrix.suffix }}" = "linux-amd64" ]; then
+            URL="${{ needs.meta.outputs.UOS_DOWNLOAD_AMD64 }}"
+          else
+            URL="${{ needs.meta.outputs.UOS_DOWNLOAD_ARM64 }}"
+          fi
+          curl -fSL -o unifi-os-server "$URL"
+
+      - name: Extract OCI image from installer
+        run: |
+          # The installer is an ELF+ZIP polyglot — the OCI image is in the
+          # appended ZIP archive. No need to execute the installer.
+          # unzip returns exit code 1 for the "extra bytes" warning but
+          # extracts successfully, so we allow exit 1.
+          unzip -o unifi-os-server image.tar || [ $? -le 1 ]
+          rm unifi-os-server
+          test -f image.tar
+          # The archived entry has no read bit; restore it so the loader works.
+          chmod u+rw image.tar
+
+      - name: Load base image
+        id: base
+        run: |
+          IMAGE_REF=$(podman load -i image.tar | grep -oP '(?:Loaded image\(s\): |Loaded image: )\K\S+')
+          echo "image_ref=$IMAGE_REF" >> "$GITHUB_OUTPUT"
+          echo "Loaded: $IMAGE_REF"
+          rm image.tar
+
+      - name: Build final image
+        env:
+          APP_VERSION: ${{ needs.meta.outputs.UOS_VERSION }}
+        run: |
+          sed -i "s/APP_VERSION=.*/APP_VERSION=\"$APP_VERSION\"/" Dockerfile
+          podman build \
+            --build-arg BASE_IMAGE=${{ steps.base.outputs.image_ref }} \
+            -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.meta.outputs.UOS_VERSION }}-${{ matrix.suffix }} \
+            .
+
+      - name: Login to GHCR
+        uses: redhat-actions/podman-login@4c93cb1ea36b10156ea541570dc69bc04dffe10e # v1.1.2
+        with:
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+          registry: ${{ env.REGISTRY }}
+
+      - name: Push per-arch image
+        # Per-arch tags are intermediate build artifacts consumed by the
+        # manifest step below; they are cleaned up in the merge job so that
+        # only :<version> and :latest remain as published tags.
+        run: |
+          podman push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.meta.outputs.UOS_VERSION }}-${{ matrix.suffix }}
+
+  merge:
+    needs: [meta, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      packages: write
+    steps:
+      - name: Log in to the Container registry
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and push multiarch manifest
+        env:
+          VERSION: ${{ needs.meta.outputs.UOS_VERSION }}
+          REGISTRY: ${{ env.REGISTRY }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+        run: |
+          set -euo pipefail
+          image="${REGISTRY}/${IMAGE_NAME}"
+          for tag in "${VERSION}" latest; do
+            docker manifest create \
+              "${image}:${tag}" \
+              "${image}:${VERSION}-linux-amd64" \
+              "${image}:${VERSION}-linux-arm64"
+            docker manifest push "${image}:${tag}"
+          done
+
+      - name: Delete intermediate per-arch tags
+        # Keep only :<version> and :latest published. Non-fatal if the token
+        # lacks delete scope — the per-arch tags are harmless leftovers then.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.meta.outputs.UOS_VERSION }}
+        run: |
+          set -uo pipefail
+          pkg=$(basename "${{ env.IMAGE_NAME }}")
+
+          # Repo owner is a user account; use the user packages endpoint.
+          # For an org-owned repo, swap this for orgs/<owner>/packages/...
+          base="users/${{ github.repository_owner }}/packages/container/${pkg}/versions"
+
+          for suffix in linux-amd64 linux-arm64; do
+            id=$(gh api "$base" --paginate \
+              --jq ".[] | select(.metadata.container.tags[]? == \"${VERSION}-${suffix}\") | .id" | head -n1)
+            if [ -n "${id}" ]; then
+              echo "Deleting ${VERSION}-${suffix} (version id ${id})"
+              gh api --method DELETE "${base}/${id}" || echo "delete failed for ${id}"
+            else
+              echo "No version found for tag ${VERSION}-${suffix}"
+            fi
+          done
