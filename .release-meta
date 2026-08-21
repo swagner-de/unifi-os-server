@@ -1,0 +1,3 @@
+UOS_VERSION=5.1.37
+UOS_DOWNLOAD_AMD64=https://fw-download.ubnt.com/data/unifi-os-server/9aee-linux-x64-5.1.37-a88d909c-2ac0-43f8-bb22-2bff3b673cbb.37-x64
+UOS_DOWNLOAD_ARM64=https://fw-download.ubnt.com/data/unifi-os-server/e060-linux-arm64-5.1.37-eafe439e-ca8f-4aeb-bd82-85d2edf345ff.37-arm64
