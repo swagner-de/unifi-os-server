@@ -71,11 +71,26 @@ spec:
             - name: data
               mountPath: /var/log
               subPath: log
+            - name: data
+              mountPath: /persistent
+              subPath: persistent
+            - name: data
+              mountPath: /srv
+              subPath: srv
+            - name: data
+              mountPath: /etc/rabbitmq/ssl
+              subPath: rabbitmq
             {{- end }}
             - name: tmpfs-run
               mountPath: /run
             - name: tmpfs-run-lock
               mountPath: /run/lock
+            - name: tmpfs-tmp
+              mountPath: /tmp
+            - name: tmpfs-journal
+              mountPath: /var/lib/journal
+            - name: tmpfs-unifi-tmp
+              mountPath: /var/opt/unifi/tmp
             - name: cgroup
               mountPath: /sys/fs/cgroup
             {{- range .Values.persistence.extraVolumes }}
@@ -103,6 +118,16 @@ spec:
         - name: tmpfs-run-lock
           emptyDir:
             medium: Memory
+        - name: tmpfs-tmp
+          emptyDir:
+            medium: Memory
+        - name: tmpfs-journal
+          emptyDir:
+            medium: Memory
+        - name: tmpfs-unifi-tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi
         - name: cgroup
           hostPath:
             path: /sys/fs/cgroup
