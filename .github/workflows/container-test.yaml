@@ -1,0 +1,166 @@
+name: Container tests
+
+on:
+  pull_request:
+    paths:
+      - .release-meta
+      - Dockerfile
+      - uos-entrypoint.sh
+      - .github/workflows/container-test.yaml
+
+permissions:
+  contents: read
+
+jobs:
+  boot-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            suffix: linux-amd64
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            suffix: linux-arm64
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Read release metadata
+        id: meta
+        run: |
+          set -euo pipefail
+          test -f .release-meta
+          # shellcheck disable=SC1091
+          . ./.release-meta
+          if [ -z "${UOS_VERSION:-}" ] || [ -z "${UOS_DOWNLOAD_AMD64:-}" ] || [ -z "${UOS_DOWNLOAD_ARM64:-}" ]; then
+            echo ".release-meta is missing required fields" >&2
+            exit 1
+          fi
+          if [ "${{ matrix.arch }}" = "amd64" ]; then
+            echo "url=$UOS_DOWNLOAD_AMD64" >> "$GITHUB_OUTPUT"
+          else
+            echo "url=$UOS_DOWNLOAD_ARM64" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=$UOS_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Download installer
+        run: curl -fSL -o unifi-os-server "${{ steps.meta.outputs.url }}"
+
+      - name: Extract OCI image from installer
+        run: |
+          # ELF+ZIP polyglot; OCI image is in the appended ZIP. unzip exits 1
+          # on the "extra bytes" warning but extracts fine, so allow exit <=1.
+          unzip -o unifi-os-server image.tar || [ $? -le 1 ]
+          rm unifi-os-server
+          test -f image.tar
+          # The archived entry has no read bit; restore it so docker load works.
+          chmod u+rw image.tar
+
+      - name: Load base image
+        id: base
+        run: |
+          set -euo pipefail
+          IMAGE_REF=$(docker load -i image.tar | grep -oP '(?:Loaded image\(s\): |Loaded image: )\K\S+')
+          echo "image_ref=$IMAGE_REF" >> "$GITHUB_OUTPUT"
+          echo "Loaded: $IMAGE_REF"
+          rm image.tar
+
+      - name: Build image under test
+        env:
+          APP_VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          sed -i "s/APP_VERSION=.*/APP_VERSION=\"$APP_VERSION\"/" Dockerfile
+          docker build \
+            --build-arg BASE_IMAGE="${{ steps.base.outputs.image_ref }}" \
+            -t uos-under-test:${{ matrix.suffix }} \
+            .
+
+      - name: Boot container with systemd
+        run: |
+          set -euo pipefail
+          docker run -d --name uos \
+            --privileged \
+            --cgroupns=host \
+            --cap-add NET_ADMIN \
+            --cap-add NET_RAW \
+            --tmpfs /run:exec \
+            --tmpfs /run/lock \
+            --tmpfs /tmp:exec \
+            -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
+            -e UOS_SYSTEM_IP=unifi.test.local \
+            -p 11443:443 \
+            uos-under-test:${{ matrix.suffix }}
+
+      - name: Wait for systemd to reach running state
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            state=$(docker exec uos systemctl is-system-running 2>/dev/null || true)
+            echo "systemd state: ${state:-<none>} (attempt $i)"
+            # "running" is ideal; "degraded" is acceptable — some units may be
+            # inactive in a container, but the system booted.
+            case "$state" in
+              running|degraded) echo "systemd booted (${state})"; exit 0 ;;
+            esac
+            sleep 5
+          done
+          echo "systemd did not reach a booted state in time" >&2
+          docker exec uos systemctl list-units --failed --no-pager || true
+          exit 1
+
+      - name: Verify entrypoint metadata files
+        run: |
+          set -euo pipefail
+          version="${{ steps.meta.outputs.version }}"
+          expected_platform=$([ "${{ matrix.arch }}" = "amd64" ] && echo "linux-x64" || echo "arm64")
+
+          got_version=$(docker exec uos cat /usr/lib/version)
+          got_platform=$(docker exec uos cat /usr/lib/platform)
+          got_product=$(docker exec uos cat /usr/lib/product_name)
+          echo "version=$got_version platform=$got_platform product=$got_product"
+
+          echo "$got_version" | grep -q "UOSSERVER.0000000.${version}.0000000.000000.0000"
+          [ "$got_platform" = "$expected_platform" ]
+          [ "$got_product" = "UniFi OS Server" ]
+
+      - name: Verify UOS_UUID persisted
+        run: |
+          set -euo pipefail
+          docker exec uos test -s /data/uos_uuid
+          echo "uos_uuid: $(docker exec uos cat /data/uos_uuid)"
+
+      - name: Wait for UniFi UI on 443
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            code=$(curl -sk -o /dev/null -w '%{http_code}' https://localhost:11443/ || true)
+            echo "UI HTTP status: ${code} (attempt $i)"
+            # Any HTTP response (200/302/redirect) means nginx is serving.
+            if [ -n "$code" ] && [ "$code" != "000" ]; then
+              echo "UniFi UI is responding (HTTP ${code})"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "UniFi UI did not respond on 443 in time" >&2
+          docker exec uos systemctl status nginx --no-pager || true
+          exit 1
+
+      - name: Dump container logs on failure
+        if: failure()
+        run: |
+          echo "=== docker logs ==="
+          docker logs uos || true
+          echo "=== failed units ==="
+          docker exec uos systemctl list-units --failed --no-pager || true
+          echo "=== journal (last 200) ==="
+          docker exec uos journalctl -n 200 --no-pager || true
+
+      - name: Cleanup
+        if: always()
+        run: docker rm -f uos || true
