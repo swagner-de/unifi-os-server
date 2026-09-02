@@ -143,28 +143,8 @@ jobs:
             docker manifest push "${image}:${tag}"
           done
 
-      - name: Delete intermediate per-arch tags
-        # Keep only :<version> and :latest published. Non-fatal if the token
-        # lacks delete scope — the per-arch tags are harmless leftovers then.
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ needs.meta.outputs.UOS_VERSION }}
-        run: |
-          set -uo pipefail
-          pkg=$(basename "${{ env.IMAGE_NAME }}")
-
-          # Repo owner is a user account; use the user packages endpoint.
-          # For an org-owned repo, swap this for orgs/<owner>/packages/...
-          base="users/${{ github.repository_owner }}/packages/container/${pkg}/versions"
-
-          for suffix in linux-amd64 linux-arm64; do
-            id=$(gh api "$base" --paginate \
-              --jq ".[] | select(.metadata.container.tags[]? == \"${VERSION}-${suffix}\") | .id" | head -n1)
-            if [ -n "${id}" ]; then
-              echo "Deleting ${VERSION}-${suffix} (version id ${id})"
-              gh api --method DELETE "${base}/${id}" || echo "delete failed for ${id}"
-            else
-              echo "No version found for tag ${VERSION}-${suffix}"
-            fi
-          done
+      # NOTE: The per-arch tags (:<version>-linux-amd64 / -arm64) are left in
+      # place on purpose. The multiarch index above references them by digest,
+      # and on GHCR deleting a tagged package *version* deletes the underlying
+      # manifest — which would leave the index pointing at missing children
+      # (docker pull -> "manifest unknown"). Do not delete them.
