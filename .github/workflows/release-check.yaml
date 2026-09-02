@@ -3,7 +3,8 @@ name: Check for new releases
 on:
   workflow_dispatch:
   schedule:
-    - cron: "27 * * * *"
+    # Once a day at 06:27 UTC.
+    - cron: "27 6 * * *"
 
 jobs:
   release-check:

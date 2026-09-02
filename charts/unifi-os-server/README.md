@@ -25,7 +25,7 @@ NetworkPolicy supplied via `extraManifests` (see below).
 ## Install
 
 ```bash
-helm install unifi-os-server oci://ghcr.io/swagner-de/unifi-os-server
+helm install unifi-os-server oci://ghcr.io/swagner-de/charts/unifi-os-server
 ```
 
 ## Device Adoption

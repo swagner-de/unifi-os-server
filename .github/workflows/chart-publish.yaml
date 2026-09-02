@@ -45,6 +45,10 @@ jobs:
             --username "${{ github.actor }}" --password-stdin
 
       - name: Push chart
+        # Publish under a dedicated `charts` namespace so the chart does not
+        # share a package path with the OS server image, which lives at
+        # ghcr.io/<owner>/unifi-os-server. The chart lands at
+        # ghcr.io/<owner>/charts/unifi-os-server.
         run: |
           helm push "${{ steps.package.outputs.path }}" \
-            "oci://${REGISTRY}/${{ github.repository_owner }}"
+            "oci://${REGISTRY}/${{ github.repository_owner }}/charts"

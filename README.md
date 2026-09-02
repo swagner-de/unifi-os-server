@@ -20,7 +20,7 @@ See [docker-compose.yaml](https://github.com/swagner-de/unifi-os-server/blob/mai
 Install the Helm chart (published as an OCI artifact):
 
 ```bash
-helm install unifi-os-server oci://ghcr.io/swagner-de/unifi-os-server \
+helm install unifi-os-server oci://ghcr.io/swagner-de/charts/unifi-os-server \
   --namespace unifi --create-namespace
 ```
 
