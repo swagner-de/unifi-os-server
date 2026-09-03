@@ -4,7 +4,7 @@ FROM ${BASE_IMAGE}
 LABEL org.opencontainers.image.source="https://github.com/lemker/unifi-os-server"
 
 ENV container="docker"
-ENV APP_VERSION="5.1.37"
+ENV APP_VERSION="5.1.40"
 ENV APP_MODEL="UOSSERVER"
 ENV PRODUCT_NAME="UniFi OS Server"
 
