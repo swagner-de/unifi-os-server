@@ -15,9 +15,19 @@ do **not** apply:
 - `seccompProfile: RuntimeDefault` — systemd syscalls would be blocked
 
 UniFi OS Server runs every component as systemd services internally, which
-requires host cgroup access (`hostPath /sys/fs/cgroup`) and tmpfs mounts
-(`/run`, `/run/lock`). This is an inherent requirement of the upstream project
-and cannot be worked around.
+requires cgroup access and tmpfs mounts (`/run`, `/run/lock`). The default
+`runtime: runc` mounts the host cgroup hierarchy at `/sys/fs/cgroup`.
+
+Set `runtime: kata` when using Kata Containers. This mode:
+
+- sets `spec.runtimeClassName` to `runtimeClassName` (default: `kata`);
+- uses Kata's native guest cgroup hierarchy instead of mounting the host path;
+- adjusts the image's MAC detection for Kata's PCI-backed virtio `eth0` before
+  starting the normal entrypoint, so UniFi Core can populate `board.serialno`.
+
+Only `runc` and `kata` are accepted values. The `kata` RuntimeClass must already
+exist in the cluster. Set `runtimeClassName` if your RuntimeClass has another
+name, such as `kata-qemu`.
 
 **Recommendation:** Run this in an isolated namespace. Restrict traffic with a
 NetworkPolicy supplied via `extraManifests` (see below).
@@ -26,6 +36,25 @@ NetworkPolicy supplied via `extraManifests` (see below).
 
 ```bash
 helm install unifi-os-server oci://ghcr.io/swagner-de/charts/unifi-os-server
+```
+
+For Kata Containers:
+
+```bash
+helm install unifi-os-server oci://ghcr.io/swagner-de/charts/unifi-os-server \
+  --set runtime=kata \
+  --set runtimeClassName=kata-qemu
+```
+
+## Image
+
+The image repository and tag can be overridden independently. An empty tag uses
+the chart's `appVersion`.
+
+```yaml
+image:
+  repository: ghcr.io/swagner-de/unifi-os-server
+  tag: "5.1.40"
 ```
 
 ## Device Adoption
