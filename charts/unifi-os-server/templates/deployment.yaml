@@ -1,5 +1,11 @@
 apiVersion: apps/v1
 kind: Deployment
+{{- if not (has .Values.runtime (list "runc" "kata")) }}
+{{- fail "runtime must be one of: runc, kata" }}
+{{- end }}
+{{- if and (eq .Values.runtime "kata") (empty .Values.runtimeClassName) }}
+{{- fail "runtimeClassName must be set when runtime is kata" }}
+{{- end }}
 metadata:
   name: {{ include "uos.fullname" . }}
   labels:
@@ -20,9 +26,19 @@ spec:
       {{- end }}
     spec:
       terminationGracePeriodSeconds: 120
+      {{- if eq .Values.runtime "kata" }}
+      runtimeClassName: {{ .Values.runtimeClassName }}
+      {{- end }}
       containers:
         - name: main
           image: {{ include "uos.image" . | quote }}
+          {{- if eq .Values.runtime "kata" }}
+          command:
+            - /bin/bash
+            - -c
+          args:
+            - sed -i 's#/sys/devices/virtual/net/eth0#/sys/class/net/eth0#g' /sbin/ubnt-tools && exec /root/uos-entrypoint.sh
+          {{- end }}
           securityContext:
             privileged: true
           env:
@@ -91,8 +107,10 @@ spec:
               mountPath: /var/lib/journal
             - name: tmpfs-unifi-tmp
               mountPath: /var/opt/unifi/tmp
+            {{- if eq .Values.runtime "runc" }}
             - name: cgroup
               mountPath: /sys/fs/cgroup
+            {{- end }}
             {{- range .Values.persistence.extraVolumes }}
             {{- $volName := .name }}
             {{- range .mounts }}
@@ -128,9 +146,11 @@ spec:
           emptyDir:
             medium: Memory
             sizeLimit: 64Mi
+        {{- if eq .Values.runtime "runc" }}
         - name: cgroup
           hostPath:
             path: /sys/fs/cgroup
+        {{- end }}
         {{- range .Values.persistence.extraVolumes }}
         - name: {{ .name }}
           {{- if .secret }}

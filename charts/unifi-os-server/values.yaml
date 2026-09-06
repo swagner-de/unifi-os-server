@@ -2,6 +2,11 @@ image:
   repository: ghcr.io/swagner-de/unifi-os-server
   tag: ""
 
+# runc mounts the host cgroup hierarchy for systemd. kata uses the guest's
+# native cgroup hierarchy and adjusts UniFi's MAC detection for virtio eth0.
+runtime: runc
+runtimeClassName: kata
+
 uosSystemIP: ""
 
 podAnnotations: {}
