@@ -110,7 +110,7 @@ spec:
         {{- if .Values.persistence.data.enabled }}
         - name: data
           persistentVolumeClaim:
-            claimName: {{ include "uos.fullname" . }}-data
+            claimName: {{ .Values.persistence.data.claimName | default (printf "%s-data" (include "uos.fullname" .)) }}
         {{- end }}
         - name: tmpfs-run
           emptyDir:

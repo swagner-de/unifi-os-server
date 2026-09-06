@@ -2,7 +2,7 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: {{ include "uos.fullname" . }}-data
+  name: {{ .Values.persistence.data.claimName | default (printf "%s-data" (include "uos.fullname" .)) }}
   labels:
     {{- include "uos.labels" . | nindent 4 }}
 spec:
